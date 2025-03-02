@@ -36,7 +36,7 @@ distV = single.empty;
         end
         for r=2:sawLen
             sawS(r) = sawS(r-1) + 1;
-            if (sawS(r) == 2^(8*1))
+            if (sawS(r) == 2^(8*byteNum))
                 sawS(r) = 0;
             end
         end

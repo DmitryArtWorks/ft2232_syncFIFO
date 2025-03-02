@@ -10,7 +10,7 @@
 
 
 #define PacketSize 512
-#define NumSamples 100000000
+#define NumSamples 1000000000
 #define PacketCoef 1 // (пока 1, но должно быть 2) потому что один отсчет будет преобразован в два 8-битных отсчета
 #define rxTotal NumSamples*PacketCoef
 
@@ -18,7 +18,7 @@ FT_HANDLE Handle1;
 FT_STATUS myftStatus;
 UCHAR MASK = 0xFF; // Я В ДУШЕ НЕ ЕБУ, ДОЛЖНЫ БЫТЬ ЗДЕСЬ ВСЕ НУЛИ ИЛИ ВСЕ ЕДИНИЦЫ (0xFF)
 UCHAR Mode;
-UCHAR LatTimer = 16;
+UCHAR LatTimer = 64;
     DWORD sig1 = 0x00000000;
     DWORD sig2 = 0xFFFFFFFF;
 
@@ -66,19 +66,33 @@ int main(){
         goto endProg;
     }
     
-
-    myftStatus = FT_OpenEx("FT9MR6CDA", FT_OPEN_BY_SERIAL_NUMBER, &Handle1); // Открытие по серийнику. Иначе конфликты с программатором ПЛИС (он тоже на FTDI сделан)
+    // "FT9MR6CDA" - плата. "219DJ74T" - Аlinx
+    myftStatus = FT_OpenEx("219DJ74T", FT_OPEN_BY_SERIAL_NUMBER, &Handle1); // Открытие по серийнику. Иначе конфликты с программатором ПЛИС (он тоже на FTDI сделан)
     if (!FT_SUCCESS(myftStatus)){
         printf("err no %ld while opening device\n", myftStatus);
         goto endProg;
     }
+    // myftStatus = FT_ResetDevice(Handle1);
+    // if (myftStatus != FT_OK) {
+    //     // Обработка ошибки сброса
+    //     printf("Error resetting\n");
+    //     FT_Close(Handle1);
+    //     return 1;
+    // }
     
+    myftStatus = FT_OpenEx("219DJ74T", FT_OPEN_BY_SERIAL_NUMBER, &Handle1); // Открытие по серийнику. Иначе конфликты с программатором ПЛИС (он тоже на FTDI сделан)
+    // myftStatus = FT_Open(0, &Handle1);
+    if (!FT_SUCCESS(myftStatus)){
+        printf("err no %ld while opening device\n", myftStatus);
+        goto endProg;
+    }
+
 
     // // // // // // // //
     // CODE STARTS HERE  // 
     // // // // // // // //
 
-    // printEEPdata(Handle1);
+    printEEPdata(Handle1);
     
     if (!FT_SUCCESS(FT_SetBitMode(Handle1, MASK, FT_BITMODE_RESET))){
         printf("error #%i while resetting\n", myftStatus);
@@ -112,7 +126,7 @@ int main(){
         goto endProg;
         }
 
-        if (!FT_SUCCESS(FT_SetUSBParameters(Handle1, 0x10000, 0x10000))){
+        if (!FT_SUCCESS(FT_SetUSBParameters(Handle1, 0x4000, 0x4000))){
             printf("error #%i while setting USB parameters\n", myftStatus);
             goto endProg;
         }
@@ -124,17 +138,23 @@ int main(){
         // goto endProg;
         // }
     }
+    // FT_SetBaudRate(Handle1, 9600); // не влияет в FIFO режиме, но требуется
+    // FT_Purge(Handle1, FT_PURGE_TX | FT_PURGE_RX);
 
     printf("Trying to receive bytes\n");
-    
-    while(numBytes < total_size){
+    size_t requested = (total_size < NumSamples) ? total_size : NumSamples;
+    while(numBytes < requested){
             if (stop) {
                 printf("Reception interrupted by user.\n");
                 break; // Выход из цикла по Ctrl+C
             }
-            if ( (FT_SUCCESS(FT_GetQueueStatus(Handle1, &rxBytes))) && (rxBytes >= PacketSize) ){
+            // FT_Read(Handle1, dataBuffer + numBytes, 0x4000, BytesReceived);
+            // FT_GetStatus(Handle1, &rxBytes, &txBytes, EventWord);
+            // FT_GetQueueStatus(Handle1, &rxBytes);
+            if ( (FT_SUCCESS(FT_GetStatus(Handle1, &rxBytes, &txBytes, &EventWord))) && (rxBytes >= PacketSize) ){
                 // myftStatus = // Раскоммент, если оч хочется проверить статус
                 FT_Read(Handle1, dataBuffer + numBytes, rxBytes, BytesReceived);
+                // FT_Write(Handle1, dataBuffer, 0x4000, BytesReceived);
                 numBytes += *BytesReceived;
             }
     }
@@ -200,7 +220,7 @@ void printEEPdata(FT_HANDLE Handle)
     printf("ProductId = 0x%04X\n", datastruct.ProductId);
     printf("Manufacturer = %s\n", datastruct.Manufacturer);           
     printf("ManufacturerId = %s\n\n", datastruct.ManufacturerId);
-    printf("this 2 values is nonzero if mode is 245 FIFO and 245 FIFO CPU target respectievly: %x  , %x \n", (int)datastruct.IFBIsFifo7, (int)datastruct.IFBIsFifoTar7);
+    printf("this 2 values is nonzero if mode is 245 FIFO and 245 FIFO CPU target respectievly: %x  , %x \n", (int)datastruct.IsFifoH, (int)datastruct.IFBIsFifoTar7);
     printf("this 2 values is nonzero if A and B ports is to use VCP drivers: %x  , %x \n", datastruct.AIsVCP7, datastruct.BIsVCP7);
 
     free(datastruct.Manufacturer);

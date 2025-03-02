@@ -2,20 +2,26 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "C/C++ Runner: Debug Session",
+            "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",
+            "program": "${workspaceFolder}/main_file.exe",
             "args": [],
             "stopAtEntry": false,
-            "externalConsole": true,
-            "cwd": "c:/Users/dmitr/Desktop/ft2232_driver",
-            "program": "c:/Users/dmitr/Desktop/ft2232_driver",
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
             "MIMode": "gdb",
-            "miDebuggerPath": "gdb",
+            "miDebuggerPath": "C:\\msys64\\ucrt64\\bin\\gdb.exe",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
                     "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
                     "ignoreFailures": true
                 }
             ]
@@ -24,7 +30,7 @@
             "name": "C/C++: gcc.exe build and debug active file",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${fileDirname}\\main_file.exe",
+            "program": "${fileDirname}\\${fileBasenameNoExtension}.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "C:/msys64/ucrt64/bin",
