@@ -63,6 +63,7 @@
     "stdio.h": "c",
     "stdlib.h": "c",
     "time.h": "c",
-    "dos.h": "c"
+    "dos.h": "c",
+    "windows.h": "c"
   }
 }

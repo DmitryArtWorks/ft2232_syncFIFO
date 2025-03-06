@@ -5,3 +5,6 @@ build/**
 *.log
 .vscode/
 .idea/
+*.asv
+eeprom_config.xml
+eepr_conf.ept
