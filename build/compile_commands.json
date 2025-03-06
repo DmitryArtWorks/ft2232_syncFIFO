@@ -1,8 +1,0 @@
-[
-{
-  "directory": "D:/FTDI_Project/ft2232_syncFIFO/build",
-  "command": "C:\\msys64\\ucrt64\\bin\\gcc.exe  @CMakeFiles/main.dir/includes_C.rsp -g -o CMakeFiles\\main.dir\\main.c.obj -c D:\\FTDI_Project\\ft2232_syncFIFO\\main.c",
-  "file": "D:/FTDI_Project/ft2232_syncFIFO/main.c",
-  "output": "CMakeFiles/main.dir/main.c.obj"
-}
-]
