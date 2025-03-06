@@ -11,42 +11,34 @@
 
 #define PacketSize 512
 #define NumSamples 1000000000
-#define PacketCoef 1 // (пока 1, но должно быть 2) потому что один отсчет будет преобразован в два 8-битных отсчета
+#define PacketCoef 1 // TODO: (пока 1, но должно быть 2) потому что один отсчет будет преобразован в два 8-битных отсчета
 #define rxTotal NumSamples*PacketCoef
+size_t total_size = (size_t)1024 * (size_t)1024 * (size_t)1024 * 2;
+
 
 FT_HANDLE Handle1;
 FT_STATUS myftStatus;
-UCHAR MASK = 0xFF; // Я В ДУШЕ НЕ ЕБУ, ДОЛЖНЫ БЫТЬ ЗДЕСЬ ВСЕ НУЛИ ИЛИ ВСЕ ЕДИНИЦЫ (0xFF)
-UCHAR Mode;
-UCHAR LatTimer = 64;
-    DWORD sig1 = 0x00000000;
-    DWORD sig2 = 0xFFFFFFFF;
 
-// char *rxBuffer;
 
-DWORD EventWord;
-DWORD rxBytes;
-DWORD txBytes;
-LPDWORD BytesReceived;
-static FT_PROGRAM_DATA datastruct;
-PUCHAR gotBitMode;
-
-FILE *fp;
 void printEEPdata(FT_HANDLE Handle);
+void printDevices();
 void delay(int milliseconds);
 volatile sig_atomic_t stop = 0;
-size_t total_size = (size_t)1024 * (size_t)1024 * (size_t)1024 * 2;
 
-// Обработчик сигнала SIGINT
+
+// Обработчик сигнала SIGINT. Дрянь, придуманная нейронкой для выхода из цикла по нажатию Ctrl + C
 void handle_sigint(int sig) {
     stop = 1; // Устанавливаем флаг для выхода из цикла
 }
 
 int main(){
     SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
+    FILE *fp;
 
-    BytesReceived = (LPDWORD)malloc(sizeof(LPDWORD));
-    gotBitMode = (PUCHAR)malloc(sizeof(PUCHAR));
+    DWORD rxBytes = 0;
+    DWORD txBytes = 0;
+    LPDWORD BytesReceived = 0;
+    
     size_t NumWrite = 0;
     unsigned long int numBytes = 0;
     
@@ -55,38 +47,26 @@ int main(){
     LPVOID rxBuffer   = (LPVOID) _aligned_malloc(65536 * sizeof(unsigned char)*PacketCoef + 1024, 64);
     LPVOID dataBuffer = (LPVOID) _aligned_malloc(total_size * sizeof(unsigned char)*PacketCoef + 65536, 64); // буфер
 
+    if (rxBuffer == NULL || dataBuffer == NULL) exit(1);
     memset(rxBuffer, (unsigned char)0, 65536 * sizeof(unsigned char)*PacketCoef + 1024);
     memset(dataBuffer, (unsigned char)0, total_size * sizeof(unsigned char)*PacketCoef + 65536);
     
-    if (rxBuffer == NULL || dataBuffer == NULL) exit(1);
     
     fp = fopen("test.bin", "wb");
     if (fp == NULL) {
-        printf("Cannot open file.\n");
+        printf("Cannot open file to write data.\n");
         goto endProg;
     }
     
-    // "FT9MR6CDA" - плата. "219DJ74T" - Аlinx
-    myftStatus = FT_OpenEx("219DJ74T", FT_OPEN_BY_SERIAL_NUMBER, &Handle1); // Открытие по серийнику. Иначе конфликты с программатором ПЛИС (он тоже на FTDI сделан)
-    if (!FT_SUCCESS(myftStatus)){
-        printf("err no %ld while opening device\n", myftStatus);
-        goto endProg;
-    }
-    // myftStatus = FT_ResetDevice(Handle1);
-    // if (myftStatus != FT_OK) {
-    //     // Обработка ошибки сброса
-    //     printf("Error resetting\n");
-    //     FT_Close(Handle1);
-    //     return 1;
-    // }
-    
-    myftStatus = FT_OpenEx("219DJ74T", FT_OPEN_BY_SERIAL_NUMBER, &Handle1); // Открытие по серийнику. Иначе конфликты с программатором ПЛИС (он тоже на FTDI сделан)
-    // myftStatus = FT_Open(0, &Handle1);
-    if (!FT_SUCCESS(myftStatus)){
-        printf("err no %ld while opening device\n", myftStatus);
-        goto endProg;
-    }
+    printDevices();
 
+    // "FT9MR6CDA" - QMTech (именно A, поскольку устройство воспринимается как два с литерами A и B). 
+    // "219DJ74T"  - Аlinx
+    myftStatus = FT_OpenEx("219DJ74T", FT_OPEN_BY_SERIAL_NUMBER, &Handle1); // Открытие по серийнику. Иначе конфликты с программатором ПЛИС (он тоже на FTDI сделан)
+    if (!FT_SUCCESS(myftStatus)){
+        printf("err no %ld while opening device\n", myftStatus);
+        goto endProg;
+    }
 
     // // // // // // // //
     // CODE STARTS HERE  // 
@@ -94,52 +74,8 @@ int main(){
 
     printEEPdata(Handle1);
     
-    if (!FT_SUCCESS(FT_SetBitMode(Handle1, MASK, FT_BITMODE_RESET))){
-        printf("error #%i while resetting\n", myftStatus);
-        goto endProg;
-    }
+    setupHandledDEvice(Handle1);
 
-    delay(250);
-
-    if (!FT_SUCCESS(FT_SetBitMode(Handle1, MASK, FT_BITMODE_SYNC_FIFO))){
-        printf("error #%i while setting sync FIFO mode\n", myftStatus);
-        goto endProg;
-    }
-    else{
-        myftStatus = FT_GetBitMode(Handle1, gotBitMode);
-            if (!FT_SUCCESS(myftStatus)){
-                printf("error #%i while trying to get bitmode\n", myftStatus);
-            goto endProg;
-            }
-        
-        printf("received bitmode: %p\n", gotBitMode);
-        
-        printf("setting up some options after status %i\n", myftStatus);
-        
-        if (!FT_SUCCESS(FT_SetLatencyTimer(Handle1, LatTimer))){
-            printf("error #%i while setting latency timer\n", myftStatus);
-            goto endProg;
-        }
-
-        if (!FT_SUCCESS(FT_SetTimeouts(Handle1, 1000, 1000))){
-        printf("error #%i while setting timeouts\n", myftStatus);
-        goto endProg;
-        }
-
-        if (!FT_SUCCESS(FT_SetUSBParameters(Handle1, 0x4000, 0x4000))){
-            printf("error #%i while setting USB parameters\n", myftStatus);
-            goto endProg;
-        }
-        
-        // Настройка была отключена, ибо она только для UART как я понял
-        // myftStatus = FT_SetFlowControl(Handle1, FT_FLOW_RTS_CTS, 0, 0);
-        // if (!FT_SUCCESS(myftStatus)){
-        // printf("error #%i while setting flow control\n", myftStatus);
-        // goto endProg;
-        // }
-    }
-    // FT_SetBaudRate(Handle1, 9600); // не влияет в FIFO режиме, но требуется
-    // FT_Purge(Handle1, FT_PURGE_TX | FT_PURGE_RX);
 
     printf("Trying to receive bytes\n");
     size_t requested = (total_size < NumSamples) ? total_size : NumSamples;
@@ -148,15 +84,12 @@ int main(){
                 printf("Reception interrupted by user.\n");
                 break; // Выход из цикла по Ctrl+C
             }
-            // FT_Read(Handle1, dataBuffer + numBytes, 0x4000, BytesReceived);
-            // FT_GetStatus(Handle1, &rxBytes, &txBytes, EventWord);
-            // FT_GetQueueStatus(Handle1, &rxBytes);
-            if ( (FT_SUCCESS(FT_GetStatus(Handle1, &rxBytes, &txBytes, &EventWord))) && (rxBytes >= PacketSize) ){
-                // myftStatus = // Раскоммент, если оч хочется проверить статус
-                FT_Read(Handle1, dataBuffer + numBytes, rxBytes, BytesReceived);
-                // FT_Write(Handle1, dataBuffer, 0x4000, BytesReceived);
-                numBytes += *BytesReceived;
-            }
+            FT_GetQueueStatus(Handle1, &rxBytes);
+            // if (rxBytes != 0 || txBytes != 0)
+            //     printf("RX: %lu bytes, TX: %lu bytes\n");
+            FT_Read(Handle1, dataBuffer + numBytes, rxBytes, BytesReceived);
+            
+            numBytes += *BytesReceived;
     }
 
     printf("left receiving loop. Saving data...\n");
@@ -191,6 +124,10 @@ void delay(int milliseconds)
 
 void printEEPdata(FT_HANDLE Handle)
 {
+    FT_PROGRAM_DATA datastruct;
+    DWORD sig1 = 0x00000000;
+    DWORD sig2 = 0xFFFFFFFF;
+
     datastruct.Signature1 = sig1;
     datastruct.Signature2 = sig2;
     datastruct.Manufacturer = (char *)malloc(256); /* E.g "deponce" */
@@ -227,4 +164,79 @@ void printEEPdata(FT_HANDLE Handle)
     free(datastruct.ManufacturerId);
     free(datastruct.Description);
     free(datastruct.SerialNumber);
+}
+
+void printDevices(){
+    FT_STATUS ftStatus; 
+    FT_DEVICE_LIST_INFO_NODE *devInfo; 
+    DWORD numDevs;  
+    
+    // create the device information list 
+    ftStatus = FT_CreateDeviceInfoList(&numDevs);  
+    if (ftStatus == FT_OK) 
+        printf("Number of devices is %d\n",numDevs);
+     
+    if (numDevs > 0) {  // allocate storage for list based on numDevs  
+        devInfo = (FT_DEVICE_LIST_INFO_NODE*)malloc(sizeof(FT_DEVICE_LIST_INFO_NODE)*numDevs);   
+        // get the device information list  
+        ftStatus = FT_GetDeviceInfoList(devInfo,&numDevs);   
+        if (ftStatus == FT_OK) {  
+             for (int i = 0; i < numDevs; i++) {    
+                printf("Dev %d:\n",i);     
+                printf("  Flags=0x%x\n",devInfo[i].Flags);     
+                printf("  Type=0x%x\n",devInfo[i].Type);     
+                printf("  ID=0x%x\n",devInfo[i].ID);     
+                printf("  LocId=0x%x\n",devInfo[i].LocId);     
+                printf("  SerialNumber=%s\n",devInfo[i].SerialNumber);    
+                printf("  Description=%s\n",devInfo[i].Description);     
+                printf("  ftHandle=0x%x\n",devInfo[i].ftHandle);    
+            } 
+        } 
+    }
+    else printf("No devices detected!\n");
+    free(devInfo);
+}
+
+void setupHandledDEvice(FT_HANDLE passedHandle){
+    UCHAR MASK = 0xFF;
+    PUCHAR gotBitMode = (PUCHAR)malloc(sizeof(PUCHAR)); // Legacy со времён, когда я параноил по поводу всего, потому что не ничего работало
+    UCHAR LatTimer = 64;
+
+    if (!FT_SUCCESS(FT_SetBitMode(passedHandle, MASK, FT_BITMODE_RESET))){
+        printf("error #%i while resetting. Exiting\n", myftStatus);
+        exit(1);
+    }
+
+    delay(250);
+
+    if (!FT_SUCCESS(FT_SetBitMode(passedHandle, MASK, FT_BITMODE_SYNC_FIFO))){
+        printf("error #%i while setting sync FIFO mode. Exiting\n", myftStatus);
+        exit(1);
+    }
+    else {
+        myftStatus = FT_GetBitMode(passedHandle, gotBitMode);
+            if (!FT_SUCCESS(myftStatus)){
+                printf("error #%i while trying to get bitmode. Exiting\n", myftStatus);
+                exit(1);
+            }
+        
+        printf("received bitmode: %p\n", gotBitMode);
+        
+        printf("setting up some options after status %i\n", myftStatus);
+        
+        if (!FT_SUCCESS(FT_SetLatencyTimer(passedHandle, LatTimer))){
+            printf("error #%i while setting latency timer. Exiting\n", myftStatus);
+            exit(1);
+        }
+
+        if (!FT_SUCCESS(FT_SetTimeouts(passedHandle, 1000, 1000))){
+            printf("error #%i while setting timeouts. Exiting\n", myftStatus);
+            exit(1);
+        }
+
+        if (!FT_SUCCESS(FT_SetUSBParameters(passedHandle, 0x4000, 0x4000))){
+            printf("error #%i while setting USB parameters. Exiting\n", myftStatus);
+            exit(1);
+        }
+    }
 }

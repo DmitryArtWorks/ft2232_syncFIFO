@@ -1,19 +1,21 @@
 iterRead = 1e7;
-byteNum = 2;
+byteNum = 1;
+numBytes = 2;
+
 
 distL = single.empty;
 distV = single.empty;
 % for j=1:4
-    f_ID = fopen("test.bin", 'rb', 'ieee-le'); %C:\Users\dmitr\Desktop\USBSniffExport
+    f_ID = fopen("test.bin", 'rb', 'ieee-be'); %C:\Users\dmitr\Desktop\USBSniffExport
     % fseek(f_ID, 20e3, "bof");
-    data = fread(f_ID, 0.6e6, "ubit16");
-    % plot(data)
-    % pause
+    data = fread(f_ID, [2, 2e6], "ubit16");
+    plot(data(2,:))
+    pause
     i = 1;
     % system(".\main_file.exe")
     while true
         
-        data = fread(f_ID, [2, iterRead], "ubit8=>single");
+        data = fread(f_ID, [2, iterRead], "uint16=>single");
         disp(['loaded value: ' num2str(data(byteNum, 1))])
         disp(' ')
         % if i == 1
@@ -35,15 +37,20 @@ distV = single.empty;
             sawS(1) = data(byteNum,1);
         end
         for r=2:sawLen
-            sawS(r) = sawS(r-1) + 1;
-            if (sawS(r) == 2^(8*1))
-                sawS(r) = 0;
+            sawS(r) = sawS(r-1) - 1;
+            % if (sawS(r) == 2^(8*numBytes)) % Инкрементирующийся счётчик
+            %     sawS(r) = 0;
+            % end
+            if (sawS(r) == -1) % Декрементирующийся счётчик
+                sawS(r) = 2^(8*numBytes)-1;
             end
         end
         % d2plt = data(offs+1:end);
            
         dd2plt = diff(data(byteNum,:));
-        indList = find(dd2plt ~= 1 & dd2plt ~= -255 & dd2plt ~= 0);
+        indList = find(dd2plt ~= 1 & dd2plt ~= -(2^(8*numBytes)-1) & ...
+            dd2plt ~= -1 & dd2plt ~= (2^(8*numBytes)-1) ...
+            &dd2plt ~= 0);
         % indList = find(dd2plt == -27 | dd2plt == -23 | dd2plt == -19 | dd2plt == -15);
         indListL = length(indList);
         valuesList = unique(dd2plt);
@@ -63,7 +70,7 @@ distV = single.empty;
 
         if ~isempty(indList) 
             disp(length(indList))
-            for j=15:length(indList)
+            for j=1:length(indList)
                 tmpV1 = data(byteNum,indList(j)-150:indList(j)+150);
                 tmpV2 = sawS(indList(j)-150:indList(j)+150);
                 plot(1:length(tmpV1), tmpV1, 1:length(tmpV2), tmpV2)
@@ -73,9 +80,12 @@ distV = single.empty;
         i = i + 1;
         % pause
         % end
-        sawS(1) = sawS(end) + 1;
-        if sawS(1) == 65536
-            sawS(1) = 0;
+        sawS(1) = sawS(end) - 1;
+        % if sawS(1) == 2^(8*numBytes)
+        %     sawS(1) = 0;
+        % end
+        if sawS(1) == -1
+            sawS(1) = 2^(8*numBytes) - 1;
         end
 
         disp(['extrapolated: ' num2str(sawS(1))])
