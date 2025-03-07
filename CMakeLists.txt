@@ -15,5 +15,5 @@ add_executable(main main.c)
 set_target_properties(main PROPERTIES RUNTIME_OUTPUT_DIRECTORY ..)
 # add_subdirectory(ftSrc)
 link_directories(ftSrc)
-target_link_libraries(main "${CMAKE_CURRENT_SOURCE_DIR}/ftd2xx64.dll")
+target_link_libraries(main "${CMAKE_CURRENT_SOURCE_DIR}/ftSrc/ftd2xx64.dll")
 

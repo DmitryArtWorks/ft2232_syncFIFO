@@ -9,60 +9,85 @@
 // #include <minwindef.h>
 
 
-#define PacketSize 512
+#define PacketSize 512 // Минимальный объём данных, подлежащий передаче
 #define NumSamples 1000000000
 #define PacketCoef 1 // TODO: (пока 1, но должно быть 2) потому что один отсчет будет преобразован в два 8-битных отсчета
-#define rxTotal NumSamples*PacketCoef
-size_t total_size = (size_t)1024 * (size_t)1024 * (size_t)1024 * 2;
+#define rxTotal NumSamples*PacketCoef // общее количество семплов. Следует использовать именно его
 
 
-FT_HANDLE Handle1;
-FT_STATUS myftStatus;
+// наибольший объём буфера в ОЗУ. Используется для буферизации всей выборки в ОЗУ в процессе приёма
+// данные "упаковываются" в бинарник только после завершения приёма(легаси со времён поиска причин 
+// потерь данных). 
+// TODO: писать сразу в бинарник
+size_t total_size = (size_t)1024 * (size_t)1024 * (size_t)1024 * 2; 
 
 
-void printEEPdata(FT_HANDLE Handle);
+// TODO: сделать переменные локальными
+FT_HANDLE Handle1; // хэндл, по которому осуществляется общение с FTDI
+FT_STATUS myftStatus; // в него пишутся return-коды
+
+
+// Прототипы пользовательских функций
+// TODO: перенести прототипы в пользовательский header-файл
+void printEEPdata(FT_HANDLE);
 void printDevices();
-void delay(int milliseconds);
+void delay(int);
+void setupHandledDevice(FT_HANDLE);
+
+// Переменная, являющаяся частью имплементации способа выхода из цикла передачи данных, придуманного нейронкой
 volatile sig_atomic_t stop = 0;
 
 
 // Обработчик сигнала SIGINT. Дрянь, придуманная нейронкой для выхода из цикла по нажатию Ctrl + C
 void handle_sigint(int sig) {
     stop = 1; // Устанавливаем флаг для выхода из цикла
+    printf("Reception interrupted by user.\n");
 }
 
 int main(){
+    // Запрашиваем для процесса приоритет реального времени. Без прав администратора 
+    // программа запустится с высоким приориетом.
     SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
-    FILE *fp;
 
-    DWORD rxBytes = 0;
-    DWORD txBytes = 0;
-    LPDWORD BytesReceived = 0;
+    FILE *fp; // Указатель на бинарный файл, куда будут сохраняться данные
+
+    DWORD rxBytes = 0; // переменная, содержащая в себе число данных, готовых к отправке В  ПК
+    DWORD txBytes = 0; // переменная, содержащая в себе число данных, готовых к отправке ИЗ ПК. Что-то типа очереди передачи
+    LPDWORD BytesReceived = 0; // переменная, содержащая в себе число байт, которые были считаны за вызов FT_Read
     
-    size_t NumWrite = 0;
-    unsigned long int numBytes = 0;
+    
+    size_t numBytes = 0; // переменная, содержащая в себе число байт, принятых за цикл передачи данных 
     
     // Установка обработчика сигнала SIGINT (чтобы по Ctrl+C выходить из приёмного цикла. Придумано нейронкой)
     signal(SIGINT, handle_sigint);
-    LPVOID rxBuffer   = (LPVOID) _aligned_malloc(65536 * sizeof(unsigned char)*PacketCoef + 1024, 64);
-    LPVOID dataBuffer = (LPVOID) _aligned_malloc(total_size * sizeof(unsigned char)*PacketCoef + 65536, 64); // буфер
 
-    if (rxBuffer == NULL || dataBuffer == NULL) exit(1);
-    memset(rxBuffer, (unsigned char)0, 65536 * sizeof(unsigned char)*PacketCoef + 1024);
+    // выровненный буфер. Нужен для использования SIMD. 
+    // TODO: уменьшить буфер до размера одной пачки передаваемых данных (задаётся в FT_SetUSBParameters())
+    LPVOID dataBuffer = (LPVOID) _aligned_malloc(total_size * sizeof(unsigned char)*PacketCoef + 65536, 64); 
+    // Проверка успешности выделения памяти. При неуспешном выделении случается выход
+    if (dataBuffer == NULL) {
+        printf("Cannot allocata dataBuffer. Exiting\n");
+        exit(1);
+    }
+    // Заполняем буфер нулями, чтобы память была выделена сразу, а не в процессе обращения к элементам буфера
     memset(dataBuffer, (unsigned char)0, total_size * sizeof(unsigned char)*PacketCoef + 65536);
     
-    
+    // Открываем файл для записи в бинарном режиме 
     fp = fopen("test.bin", "wb");
     if (fp == NULL) {
         printf("Cannot open file to write data.\n");
         goto endProg;
     }
     
+    // Выводим информацию обо всех подключенных устройствах FTDI. Особенно полезно, если нужно узнать серийник 
+    // устройства, которое следует открыть (полезно, когда к ПК подключено сразу несколько устройств FTDI)
     printDevices();
 
     // "FT9MR6CDA" - QMTech (именно A, поскольку устройство воспринимается как два с литерами A и B). 
     // "219DJ74T"  - Аlinx
-    myftStatus = FT_OpenEx("219DJ74T", FT_OPEN_BY_SERIAL_NUMBER, &Handle1); // Открытие по серийнику. Иначе конфликты с программатором ПЛИС (он тоже на FTDI сделан)
+    // Открытие по серийнику. При использовании FT_Open() у меня возникали конфликты с программатором
+    // ПЛИС
+    myftStatus = FT_OpenEx("219DJ74T", FT_OPEN_BY_SERIAL_NUMBER, &Handle1); 
     if (!FT_SUCCESS(myftStatus)){
         printf("err no %ld while opening device\n", myftStatus);
         goto endProg;
@@ -71,29 +96,39 @@ int main(){
     // // // // // // // //
     // CODE STARTS HERE  // 
     // // // // // // // //
-
+    
+    // Вывод данных, сохранённых в EEPROM. Полезно для выяснения, есть ли вообще контакт с микросхемой
     printEEPdata(Handle1);
     
-    setupHandledDEvice(Handle1);
+    // Настройка микросхемы (режим, таймауты, размеры буферов и т.д.)
+    setupHandledDevice(Handle1);
 
-
+    
     printf("Trying to receive bytes\n");
-    size_t requested = (total_size < NumSamples) ? total_size : NumSamples;
+    
+    // Проверяем, что больше - total_size или rx_total. Нужно поскольку 
+    // total_size жёстко ограничивает объём выделяемой ОЗУ, тогда как 
+    // rxTotal подразумевает непосредственное регулярное изменение пользователем
+    // Т.е. можно запросить объём данных, который не поместится в ОЗУ, а за счёт
+    // этой строчки будет принят вмещающийся объём данных.
+    size_t requested = (total_size < rxTotal) ? total_size : rxTotal;
+    
+    // Начало цикла передачи данных
+    // В это время программа ничего не выводит,
+    // TODO: добавить вывод информации о процессе передачи данных
     while(numBytes < requested){
-            if (stop) {
-                printf("Reception interrupted by user.\n");
+            if (stop)                
                 break; // Выход из цикла по Ctrl+C
-            }
-            FT_GetQueueStatus(Handle1, &rxBytes);
-            // if (rxBytes != 0 || txBytes != 0)
-            //     printf("RX: %lu bytes, TX: %lu bytes\n");
-            FT_Read(Handle1, dataBuffer + numBytes, rxBytes, BytesReceived);
-            
-            numBytes += *BytesReceived;
+            // Запрашиваем у устройства информацию об объёме данных, который готов
+            // к передаче, и, если он достаточен, читаем этот объём
+            if (FT_SUCCESS(FT_GetQueueStatus(Handle1, &rxBytes)) && rxBytes >= PacketSize)
+                FT_Read(Handle1, dataBuffer + numBytes, rxBytes, BytesReceived);
+            numBytes += *BytesReceived; // добавляем число принятых за вызов FT_Read() байт в общее число принятых.
     }
 
     printf("left receiving loop. Saving data...\n");
-    NumWrite = fwrite(dataBuffer, sizeof(char), numBytes, fp);
+    // Сохраняем данные в файл.
+    size_t NumWrite = fwrite(dataBuffer, sizeof(char), numBytes, fp);
     printf("Successfully written %lu bytes\n", NumWrite);
     
     
@@ -103,8 +138,8 @@ int main(){
         printf("err no %ld while closing device\n", myftStatus);
     else printf("Device closed successful, code %ld\n", myftStatus);
 
+    // Освобождаем ресурсы, которые необходимо освободить.
     fclose(fp);
-    _aligned_free(rxBuffer);
     _aligned_free(dataBuffer);
     
     return 0;
@@ -197,7 +232,7 @@ void printDevices(){
     free(devInfo);
 }
 
-void setupHandledDEvice(FT_HANDLE passedHandle){
+void setupHandledDevice(FT_HANDLE passedHandle){
     UCHAR MASK = 0xFF;
     PUCHAR gotBitMode = (PUCHAR)malloc(sizeof(PUCHAR)); // Legacy со времён, когда я параноил по поводу всего, потому что не ничего работало
     UCHAR LatTimer = 64;
