@@ -19,10 +19,10 @@
 // данные "упаковываются" в бинарник только после завершения приёма(легаси со времён поиска причин 
 // потерь данных). 
 // TODO: писать сразу в бинарник
-size_t total_size = (size_t)1024 * (size_t)1024 * (size_t)1024 * 2; 
+size_t total_size = (size_t)1024 * (size_t)1024 * (size_t)1024 * 3; 
 
 
-// TODO: сделать переменные локальными
+// TODO: сделать переменные локальными. Пока с этим проблемы:
 FT_HANDLE Handle1; // хэндл, по которому осуществляется общение с FTDI
 FT_STATUS myftStatus; // в него пишутся return-коды
 
@@ -33,6 +33,7 @@ void printEEPdata(FT_HANDLE);
 void printDevices();
 void delay(int);
 void setupHandledDevice(FT_HANDLE);
+void printProgressBar(DWORD, DWORD);
 
 // Переменная, являющаяся частью имплементации способа выхода из цикла передачи данных, придуманного нейронкой
 volatile sig_atomic_t stop = 0;
@@ -41,7 +42,7 @@ volatile sig_atomic_t stop = 0;
 // Обработчик сигнала SIGINT. Дрянь, придуманная нейронкой для выхода из цикла по нажатию Ctrl + C
 void handle_sigint(int sig) {
     stop = 1; // Устанавливаем флаг для выхода из цикла
-    printf("Reception interrupted by user.\n");
+    printf("Receiving interrupted by user.\n");
 }
 
 int main(){
@@ -53,7 +54,7 @@ int main(){
 
     DWORD rxBytes = 0; // переменная, содержащая в себе число данных, готовых к отправке В  ПК
     DWORD txBytes = 0; // переменная, содержащая в себе число данных, готовых к отправке ИЗ ПК. Что-то типа очереди передачи
-    LPDWORD BytesReceived = 0; // переменная, содержащая в себе число байт, которые были считаны за вызов FT_Read
+    DWORD BytesReceived = 0; // переменная, содержащая в себе число байт, которые были считаны за вызов FT_Read
     
     
     size_t numBytes = 0; // переменная, содержащая в себе число байт, принятых за цикл передачи данных 
@@ -84,10 +85,11 @@ int main(){
     printDevices();
 
     // "FT9MR6CDA" - QMTech (именно A, поскольку устройство воспринимается как два с литерами A и B). 
-    // "219DJ74T"  - Аlinx
+    // "219DJ74T"  - Аlinx (Sapp)
+    // "210512180081" - Alinx (Me)
     // Открытие по серийнику. При использовании FT_Open() у меня возникали конфликты с программатором
     // ПЛИС
-    myftStatus = FT_OpenEx("219DJ74T", FT_OPEN_BY_SERIAL_NUMBER, &Handle1); 
+    myftStatus = FT_OpenEx("210512180081", FT_OPEN_BY_SERIAL_NUMBER, &Handle1); 
     if (!FT_SUCCESS(myftStatus)){
         printf("err no %ld while opening device\n", myftStatus);
         goto endProg;
@@ -97,11 +99,13 @@ int main(){
     // CODE STARTS HERE  // 
     // // // // // // // //
     
-    // Вывод данных, сохранённых в EEPROM. Полезно для выяснения, есть ли вообще контакт с микросхемой
+    // Вывод данных, сохранённых в EEPROM. Полезно для выяснения, есть ли вообще связь с микросхемой
     printEEPdata(Handle1);
     
     // Настройка микросхемы (режим, таймауты, размеры буферов и т.д.)
-    setupHandledDevice(Handle1);
+    setupHandledDevice(Handle1); // TODO: проверить, что я передал именно адрес переменной, 
+                                 // а не саму переменную (подразумевается, что Handle1 будет 
+                                 // настроен внутри этой процедуры).
 
     
     printf("Trying to receive bytes\n");
@@ -114,19 +118,23 @@ int main(){
     size_t requested = (total_size < rxTotal) ? total_size : rxTotal;
     
     // Начало цикла передачи данных
-    // В это время программа ничего не выводит,
-    // TODO: добавить вывод информации о процессе передачи данных
-    while(numBytes < requested){
+    printProgressBar(numBytes, requested);
+    while(numBytes < requested)
+    {
             if (stop)                
                 break; // Выход из цикла по Ctrl+C
             // Запрашиваем у устройства информацию об объёме данных, который готов
             // к передаче, и, если он достаточен, читаем этот объём
-            if (FT_SUCCESS(FT_GetQueueStatus(Handle1, &rxBytes)) && rxBytes >= PacketSize)
-                FT_Read(Handle1, dataBuffer + numBytes, rxBytes, BytesReceived);
-            numBytes += *BytesReceived; // добавляем число принятых за вызов FT_Read() байт в общее число принятых.
+            myftStatus = FT_GetQueueStatus(Handle1, &rxBytes);
+            if (FT_SUCCESS(myftStatus) && rxBytes >= PacketSize)
+            {
+                FT_Read(Handle1, dataBuffer + numBytes, rxBytes, &BytesReceived);
+                numBytes += BytesReceived; // добавляем число принятых за вызов FT_Read() байт в общее число принятых.
+            }
+        printProgressBar(numBytes, requested); // Обновляем прогресс-бар
     }
 
-    printf("left receiving loop. Saving data...\n");
+    printf("\nleft receiving loop. Saving data...\n");
     // Сохраняем данные в файл.
     size_t NumWrite = fwrite(dataBuffer, sizeof(char), numBytes, fp);
     printf("Successfully written %lu bytes\n", NumWrite);
@@ -143,6 +151,29 @@ int main(){
     _aligned_free(dataBuffer);
     
     return 0;
+}
+
+// Функция для отображения прогресс-бара
+void printProgressBar(DWORD numBytes, DWORD requested) {
+    // Вычисляем процент завершения
+    int progress = (int)((numBytes / (float)requested) * 100);
+    // Отображаем только кратные 5%
+    if (progress % 5 != 0) return;
+
+    // Максимальная длина прогресс-бара (50 символов)
+    const int barWidth = 50;
+    int filled = progress / 2; // Каждый '#' соответствует ~2%
+    char bar[barWidth + 1];
+
+    // Заполняем прогресс-бар
+    for (int i = 0; i < barWidth; i++) {
+    bar[i] = (i < filled) ? '#' : '-';
+    }
+    bar[barWidth] = '\0';
+
+    // Перемещаем каретку в начало строки и выводим прогресс-бар
+    printf("\r[%s] %d%%", bar, progress);
+    // fflush(stdout); // Обеспечиваем немедленный вывод
 }
 
 void delay(int milliseconds)
